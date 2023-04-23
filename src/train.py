@@ -35,7 +35,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-a", "--action", help="Action? train/trainplus", default="train")
 parser.add_argument("-c", "--cuda", help="CUDA Number", required=True)
 parser.add_argument("-e", "--epochs", help="The final total epochs you want", required=True, type=int)
-parser.add_argument("-n", "--num", help="Saved Ckpt Number", type=int, default=getLatestCkptNum())
 parser.add_argument("-b", "--batch", help="Batch Size", type=int, default=batchSize)
 parser.add_argument("-m", "--model", help="Model name", required=True)
 
@@ -76,7 +75,7 @@ def load_ckpt(cpath, model, optimizer):
 def _train(Net, optimizer, ini_epoch, device, append=False):
     history_loss = []
     GLOBAL_loss = []
-    print(f"Would be doing {args.epochs - args.num} epochs")
+    print(f"Would be doing {args.epochs - getLatestCkptNum()} epochs")
     for epoch in range(ini_epoch, args.epochs):
         permutation = torch.randperm(m)
         for i in range(0, m, batchSize):
@@ -138,6 +137,6 @@ optimizer = torch.optim.Adam(params=Net.parameters(), lr=Learning_Rate)  # Creat
 if args.action == "train":
     _train(Net, optimizer, 0, device, append=False)
 elif args.action == "trainplus":
-    _trainplus(f"{ckpts_dir}/{args.num}.pt", Net, optimizer, device)
+    _trainplus(f"{ckpts_dir}/{getLatestCkptNum()}.pt", Net, optimizer, device)
 else:
     raise ValueError("Invalid argument for action!")
