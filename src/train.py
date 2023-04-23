@@ -110,6 +110,8 @@ def _train(Net, optimizer, ini_epoch, device, append=False):
     plt.savefig(f"{ckpts_dir}/loss.png")
     plt.semilogx(GLOBAL_loss)
     plt.savefig(f"{ckpts_dir}/loss_semilogx.png")
+    plt.semilogy(GLOBAL_loss)
+    plt.savefig(f"{ckpts_dir}/loss_semilogy.png")
 
 
 def _trainplus(cpath, Net, optimizer, device):
