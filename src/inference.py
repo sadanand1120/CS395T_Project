@@ -1,6 +1,9 @@
 #!/usr/bin/env python
-import numpy as np
 import os
+import warnings
+warnings.filterwarnings("ignore")
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # or any {'0', '1', '2'}
+import numpy as np
 import torchvision.models.segmentation
 import torch
 import torchvision.transforms as tf
@@ -8,7 +11,7 @@ from torch.nn import DataParallel as DP
 from PIL import Image
 import seaborn as sns
 import matplotlib.pylab as plt
-from matplotlib.colors import LogNorm
+from scipy.spatial import KDTree
 
 from pool import pool2d
 
@@ -71,28 +74,22 @@ class NeuralPredicates:
         return pool2d(bin, kernel_size=25, stride=1, pool_mode='avg')
 
     def get_closest_dist(self, img, obstacle="static"):
-        def get_window(bmask, i, j, k):
-            return bmask[max(0, i-k):min(i+k+1, r), max(0, j-k):min(j+k+1, c)]
-
         if obstacle == "static":
             bmask = self.get_bmask(img, model="isStaticObstacle")
         elif obstacle == "dynamic":
             bmask = self.get_bmask(img, model="isDynamicObstacle")
         else:
             raise ValueError("Obstacle type not supported")
+
+        obstacle_pts = np.argwhere(bmask)
+        kd = KDTree(obstacle_pts)
+
         dist = np.zeros_like(bmask)
         r, c = bmask.shape
         for i in range(r):
             for j in range(c):
-                if bmask[i, j] == 1:
-                    dist[i, j] = 0
-                else:
-                    for k in range(1, max(r, c)):
-                        wd = get_window(bmask, i, j, k)
-                        if np.max(wd) == 1:
-                            dist[i, j] = k
-                            break
-                print("Done ", i, j, " out of ", r, c)
+                dist[i, j], _ = kd.query([i, j])
+                print("Done", i, j, "out of", r, c)
         return dist
 
 
