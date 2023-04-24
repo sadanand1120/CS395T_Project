@@ -8,8 +8,15 @@ from PIL import Image
 from inference import *
 
 class PixelSafety:
-    def __init__(self, dist_mins):
-        self.dist_mins = dist_mins
+    def __init__(self, dist_mins={}):
+        if dist_mins == {}:
+            self.dist_mins['road_static'] = 0.0
+            self.dist_mins['road_dynamic'] = 0.0
+            self.dist_mins['sidewalk_static'] = 0.0
+            self.dist_mins['sidewalk_dynamic'] = 0.0
+
+        else:
+            self.dist_mins = dist_mins
 
         self.neural_predicates = NeuralPredicates()
 
@@ -22,19 +29,21 @@ class PixelSafety:
         :return:            Array of 1s and 0s corresponding to True/False regarding pixel safety estimate
         """
 
-        is_turn = temp_lib.is_turn(img)
-        is_confined_safe = temp_lib.is_confined_safe(img)
-        is_dynamic = temp_lib.is_dynamic(img)
-        is_static = temp_lib.is_static(img)
-        is_in_front = temp_lib.is_in_front(img)
-        is_sidewalk = temp_lib.is_sidewalk(img)
-        is_road = temp_lib.is_road(img)
-        #is_bad_terrain = temp_lib.is_bad_terrain(img)
+        is_turn = self.neural_predicates.get_bmask(img, 'isAtTurn')
+        is_confined_safe = self.neural_predicates.get_bmask(img, 'isConfinedSafe')
+        is_dynamic = self.neural_predicates.get_bmask(img, 'isDynamicObstacle')
+        is_static = self.neural_predicates.get_bmask(img, 'isStaticObstacle')
+        is_in_front = self.neural_predicates.get_bmask(img, 'isInFrontEntrance')
+        is_road = self.neural_predicates.get_bmask(img, 'isRoad')
+        is_sidewalk = self.neural_predicates.get_bmask(img, 'isSidewalk')
 
-        static_obs_min_dist = temp_lib.min_dist(img, 'static')
-        dynamic_obs_min_dist = temp_lib.min_dist(img, 'dynamic')
+        #static_obs_min_dist = temp_lib.min_dist(img, 'static')
+        #dynamic_obs_min_dist = temp_lib.min_dist(img, 'dynamic')
 
-        safety_val = np.ones(is_turn.size)
+        static_obs_min_dist = torch.load('dataset/inferred_dist_bmasks/00025_static.pt')
+        dynamic_obs_min_dist = torch.load('dataset/inferred_dist_bmasks/00025_dynamic.pt')
+
+        safety_val = np.ones_like(is_turn)
 
         #Vectorized pixel safety computation
         zero_tensor = np.zeros(1)
@@ -56,14 +65,14 @@ class PixelSafety:
         safety_val = np.where(is_in_front >= 1.0, zero_tensor, safety_val)
 
         #Update with sidewalk condtions
-        safety_val = np.where((is_sidewalk >= 1.0 and (static_obs_min_dist < self.dist_mins['sidewalk_static'] or
-                                                          dynamic_obs_min_dist < self.dist_mins['sidewalk_dynamic'])),
+        safety_val = np.where(((is_sidewalk >= 1.0) & ((static_obs_min_dist < self.dist_mins['sidewalk_static']) |
+                                                     (dynamic_obs_min_dist < self.dist_mins['sidewalk_dynamic']))),
                                  zero_tensor, safety_val)
 
         #Update with road conditions
-        safety_val = np.where((is_road >= 1.0 and (static_obs_min_dist < self.dist_mins['road_static'] or
-                                                          dynamic_obs_min_dist < self.dist_mins['road_dynamic']) and
-                                  is_confined_safe <= 0.0),
+        safety_val = np.where(((is_road >= 1.0) & ((static_obs_min_dist < self.dist_mins['road_static']) |
+                                                 (dynamic_obs_min_dist < self.dist_mins['road_dynamic'])) &
+                               (is_confined_safe <= 0.0)),
                                  zero_tensor, safety_val)
 
         return safety_val
@@ -95,29 +104,44 @@ class PixelSafety:
         #Loop through training data
         list_of_upper_bounds = []
         for (img, safety) in training_imgs:
+            is_turn = self.neural_predicates.get_bmask(img, 'isAtTurn')
+            is_confined_safe = self.neural_predicates.get_bmask(img, 'isConfinedSafe')
+            is_dynamic = self.neural_predicates.get_bmask(img, 'isDynamicObstacle')
+            is_static = self.neural_predicates.get_bmask(img, 'isStaticObstacle')
+            is_in_front = self.neural_predicates.get_bmask(img, 'isInFrontEntrance')
             is_road_mask = self.neural_predicates.get_bmask(img, 'isRoad')
+            is_sidewalk = self.neural_predicates.get_bmask(img, 'isSidewalk')
+            is_bad_terrain = is_road_mask + is_sidewalk
+            is_bad_terrain = np.where(is_bad_terrain > 0, 0.0, 1.0)
 
-            static_obs_min_dist_mask = self.neural_predicates.get_closest_dist(img, 'static') * self.accuracy_mul
-            dynamic_obs_min_dist_mask = self.neural_predicates.get_closest_dist(img, 'dynamic') * self.accuracy_mul
+            # static_obs_min_dist_mask = self.neural_predicates.get_closest_dist(img, 'static') * self.accuracy_mul
+            # torch.save(static_obs_min_dist_mask, 'dataset/inferred_dist_bmasks/00025_static.pt')
+            # dynamic_obs_min_dist_mask = self.neural_predicates.get_closest_dist(img, 'dynamic') * self.accuracy_mul
+            # torch.save(dynamic_obs_min_dist_mask, 'dataset/inferred_dist_bmasks/00025_dynamic.pt')
 
-            print(static_obs_min_dist_mask)
+            static_obs_min_dist_mask = torch.load('dataset/inferred_dist_bmasks/00025_static.pt')
+            dynamic_obs_min_dist_mask = torch.load('dataset/inferred_dist_bmasks/00025_dynamic.pt')
+
+            print("Done Image Inference")
 
             for i in range(num_samples):
                 #Get pixel location
-                pixel_val = self.get_applicable_pixel(img)
+                (pixel_x, pixel_y) = self.get_applicable_pixel(is_turn, is_confined_safe, is_dynamic, is_static, is_in_front, is_road_mask, is_bad_terrain)
 
-                is_road = is_road_mask[pixel_val]
-                static_obs_min_dist = static_obs_min_dist_mask[pixel_val]
-                dynamic_obs_min_dist = dynamic_obs_min_dist_mask[pixel_val]
+                is_road = is_road_mask[pixel_x, pixel_y]
+                static_obs_min_dist = static_obs_min_dist_mask[pixel_x, pixel_y]
+                dynamic_obs_min_dist = dynamic_obs_min_dist_mask[pixel_x, pixel_y]
 
-                if safety[pixel_val] and is_road:
+                safety_val = safety[pixel_x, pixel_y][0] and safety[pixel_x, pixel_y][1] and safety[pixel_x, pixel_y][2]
+
+                if safety_val and is_road:
                     rosette_encode_str += f"\n\t\t(< road_stat {static_obs_min_dist})"
                     rosette_encode_str += f"\n\t\t(< road_dyn {dynamic_obs_min_dist})"
                     list_of_upper_bounds.append(static_obs_min_dist)
                     list_of_upper_bounds.append(dynamic_obs_min_dist)
-                elif not safety[pixel_val] and is_road:
+                elif not safety_val and is_road:
                     rosette_encode_str += f"\n\t\t(or (> road_stat {static_obs_min_dist}) (> road_dyn {dynamic_obs_min_dist}))"
-                elif safety[pixel_val] and not is_road:
+                elif safety_val and not is_road:
                     rosette_encode_str += f"\n\t\t(< side_stat {static_obs_min_dist})"
                     rosette_encode_str += f"\n\t\t(< side_dyn {dynamic_obs_min_dist})"
                     list_of_upper_bounds.append(static_obs_min_dist)
@@ -127,26 +151,27 @@ class PixelSafety:
 
         list_of_upper_bounds.sort()
 
-        rosette_encode_str += "\t))\n)"
+        rosette_encode_str += "\n\t))\n)"
 
         #Write rosette string to file and evaluate
         with open('temp.rkt', "w") as f:
             f.write(rosette_encode_str)
 
-        script_arg = 'raco test temp.rkt'
-        proc = subprocess.run(['C:\\Windows\\System32\\bash.exe', '-l', '-c', script_arg], capture_output=True)
+        proc = subprocess.run(['raco','test','--timeout','60','temp.rkt'], capture_output=True)
 
         parse = proc.stdout.decode()
 
         while parse.find('unsat') != -1:
-            #Update rosette string to remove largest lower bound
+            #Update rosette string to remove smallest upper bound
             largest_lower = str(list_of_upper_bounds.pop(0))
+            print(largest_lower)
 
             idxs_to_remove = []
             idx = 0
             for line in rosette_encode_str.split('\n'):
-                if line.find(largest_lower):
+                if line.find(largest_lower) != -1:
                     idxs_to_remove.append(idx)
+                    print('Found: ', idx)
 
                 idx += 1
 
@@ -155,44 +180,48 @@ class PixelSafety:
             for line in rosette_encode_str.split('\n'):
                 if idx not in idxs_to_remove:
                     new_rosette_encode_str += "\n" + line
+                else:
+                    print('Removing: ', idx)
+
+                idx += 1
 
             #Delete temp.rkt and rewrite
             os.remove('temp.rkt')
             with open('temp.rkt', "w") as f:
-                f.write(rosette_encode_str)
+                f.write(new_rosette_encode_str)
+
+            #Update old rosette encoding string to ensure correct lines are removed
+            rosette_encode_str = new_rosette_encode_str
 
             #Rerun
-            proc = subprocess.run(['C:\\Windows\\System32\\bash.exe', '-l', '-c', script_arg], capture_output=True)
+            proc = subprocess.run(['raco','test','--timeout','60','temp.rkt'], capture_output=True)
 
             parse = proc.stdout.decode()
 
         #Parse output and update params
+        print(parse)
         self.set_ints(parse)
 
-    def get_applicable_pixel(self, img):
-        """
-
-        :param image:   Image to check validity against
-        :return:        Pixel coordinate that is on road or sidewalk, not violating any safety concerns beside distance
-        """
+    def get_applicable_pixel(self, is_turn_mask, is_confined_safe_mask, is_dynamic_mask, is_static_mask, is_in_front_mask, is_road_mask,
+                                          is_bad_terrain_mask):
 
         valid_pixel = False
         pixel_loc = None
         while not valid_pixel:
-            pixel_x = random.randint(0, img.x_max)
-            pixel_y = random.randint(0, img.x_max)
+            pixel_x = random.randint(0, np.shape(is_turn_mask)[0]-1)
+            pixel_y = random.randint(0, np.shape(is_turn_mask)[1]-1)
 
             pixel_loc = (pixel_x, pixel_y)
 
-            valid_pixel = True
+            is_turn = is_turn_mask[pixel_x, pixel_y]
+            is_dynamic = is_dynamic_mask[pixel_x, pixel_y]
+            is_static = is_static_mask[pixel_x, pixel_y]
+            is_bad_terrain = is_bad_terrain_mask[pixel_x, pixel_y]
+            is_in_front = is_in_front_mask[pixel_x, pixel_y]
+            is_road = is_road_mask[pixel_x, pixel_y]
+            is_confined_safe = is_confined_safe_mask[pixel_x, pixel_y]
 
-            is_turn = temp_lib.is_turn(img, pixel_loc)
-            is_confined_safe = temp_lib.is_confined_safe(img, pixel_loc)
-            is_dynamic = temp_lib.is_dynamic(img, pixel_loc)
-            is_static = temp_lib.is_static(img, pixel_loc)
-            is_in_front = temp_lib.is_in_front(img, pixel_loc)
-            is_road = temp_lib.is_road(img, pixel_loc)
-            is_bad_terrain = temp_lib.is_bad_terrain(img, pixel_loc)
+            valid_pixel = True
 
             # Evaluate pixel safety
             if is_turn or is_dynamic or is_static or is_bad_terrain or is_in_front or (is_road and is_confined_safe):
@@ -203,14 +232,38 @@ class PixelSafety:
 
     def set_ints(self, parse):
         int_list = []
+        parse = parse.replace('\n', ' ')
         for sub_str in parse.split(' '):
-            if sub_str.isdigit():
-                int_list.append(int(sub_str))
+            stripped_sub_str = str(sub_str).strip("()]")
+            if stripped_sub_str.isdigit():
+                int_list.append(int(stripped_sub_str))
 
-        self.dist_mins['road_static'] = int_list[0] / float(self.accuracy_mul)
-        self.dist_mins['road_dynamic'] = int_list[1] / float(self.accuracy_mul)
-        self.dist_mins['sidewalk_static'] = int_list[2] / float(self.accuracy_mul)
-        self.dist_mins['sidewalk_dynamic'] = int_list[3] / float(self.accuracy_mul)
+        if len(int_list) == 0:
+            print(parse)
+
+        if int_list[0] / float(self.accuracy_mul) > self.dist_mins['road_static']:
+            self.dist_mins['road_static'] = int_list[0] / float(self.accuracy_mul)
+        if int_list[1] / float(self.accuracy_mul) > self.dist_mins['road_dynamic']:
+            self.dist_mins['road_dynamic'] = int_list[1] / float(self.accuracy_mul)
+        if len(int_list) >= 4:
+            if int_list[2] > 0:
+                if int_list[2] / float(self.accuracy_mul) > self.dist_mins['sidewalk_static']:
+                    self.dist_mins['sidewalk_static'] = int_list[2] / float(self.accuracy_mul)
+            else:
+                if self.dist_mins['road_static'] > self.dist_mins['sidewalk_static']:
+                    self.dist_mins['sidewalk_static'] = self.dist_mins['road_static']
+
+            if int_list[3] > 0:
+                if int_list[3] / float(self.accuracy_mul) > self.dist_mins['sidewalk_dynamic']:
+                    self.dist_mins['sidewalk_dynamic'] = int_list[3] / float(self.accuracy_mul)
+            else:
+                if self.dist_mins['road_dynamic'] > self.dist_mins['sidewalk_dynamic']:
+                    self.dist_mins['sidewalk_dynamic'] = self.dist_mins['road_dynamic']
+        else:
+            if self.dist_mins['road_static'] > self.dist_mins['sidewalk_static']:
+                self.dist_mins['sidewalk_static'] = self.dist_mins['road_static']
+            if self.dist_mins['road_dynamic'] > self.dist_mins['sidewalk_dynamic']:
+                self.dist_mins['sidewalk_dynamic'] = self.dist_mins['road_dynamic']
 
 
 if __name__ == "__main__":
@@ -220,6 +273,19 @@ if __name__ == "__main__":
     training_set = [(img, gt_safe)]
 
     #Init module
-    evaluator = PixelSafety(None)
+    #evaluator = PixelSafety()
 
-    evaluator.get_dist_params(training_set, num_samples=2)
+    #evaluator.get_dist_params(training_set, num_samples=1000)
+
+    evaluator = PixelSafety({'road_static': 625.0, 'road_dynamic': 345.0, 'sidewalk_static': 625.0, 'sidewalk_dynamic': 345.0})
+
+    #Print parse params
+    print("Road Static: ", evaluator.dist_mins['road_static'])
+    print("Road Dynamic: ", evaluator.dist_mins['road_dynamic'])
+    print("Sidewalk Static: ", evaluator.dist_mins['sidewalk_static'])
+    print("Sidewalk Dynamic: ", evaluator.dist_mins['sidewalk_dynamic'])
+
+    gen_safety_mask = evaluator.eval_pixel_safety(img)
+
+    ax = sns.heatmap(gen_safety_mask)
+    plt.show()
