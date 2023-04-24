@@ -16,6 +16,10 @@ from scipy.spatial import KDTree
 from pool import pool2d
 
 
+LINE_UP = '\033[1A'
+LINE_CLEAR = '\x1b[2K'
+
+
 class NeuralPredicates:
     def __init__(self, CKPTS_DIR="ckpts", CKPT_NUM=500):
         self.height = 1280//2
@@ -83,22 +87,36 @@ class NeuralPredicates:
 
         obstacle_pts = np.argwhere(bmask)
         kd = KDTree(obstacle_pts)
-
         dist = np.zeros_like(bmask)
+        if len(obstacle_pts) == 0:
+            dist = np.ones_like(bmask) * np.inf
+            return dist
+
         r, c = bmask.shape
         for i in range(r):
             for j in range(c):
                 dist[i, j], _ = kd.query([i, j])
                 print("Done", i, j, "out of", r, c)
+                print(LINE_UP, end=LINE_CLEAR)
         return dist
 
 
 if __name__ == "__main__":
-    neu = NeuralPredicates()
+    neu = NeuralPredicates(CKPT_NUM=2500)
     print("neu loaded")
-    img = np.array(Image.open("dataset/raw_images/00025.png"))
-    print("image loaded")
-    h = neu.get_closest_dist(img, obstacle="static")
-    print("h loaded")
-    ax = sns.heatmap(h)
-    plt.show()
+    _class = "isStaticObstacle"
+    mode = "static"
+    raw_dir = "dataset/raw_images"
+    all_imgs = os.listdir(raw_dir)
+    for count, img_name in enumerate(all_imgs):
+        img = np.array(Image.open(os.path.join(raw_dir, img_name)))
+        h = neu.get_closest_dist(img, obstacle=mode)
+        np.save(f"dataset/pixel_dist/{_class}/{img_name[:-4]}.npy", h)
+        print(f"Done {count} out of {len(all_imgs)}")
+
+    # img = np.array(Image.open("dataset/raw_images/00025.png"))
+    # print("image loaded")
+    # h = neu.get_closest_dist(img, obstacle="static")
+    # print("h loaded")
+    # ax = sns.heatmap(h)
+    # plt.show()
