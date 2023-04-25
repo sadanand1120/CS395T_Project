@@ -10,6 +10,7 @@ from inference import *
 class PixelSafety:
     def __init__(self, dist_mins={}):
         if dist_mins == {}:
+            self.dist_mins = {}
             self.dist_mins['road_static'] = 0.0
             self.dist_mins['road_dynamic'] = 0.0
             self.dist_mins['sidewalk_static'] = 0.0
@@ -22,7 +23,7 @@ class PixelSafety:
 
         self.accuracy_mul = 1000
 
-    def eval_pixel_safety(self, img):
+    def eval_pixel_safety(self, img, dist_file_name):
         """
 
         :param img:         Raw image to evaluate safety of pixels
@@ -40,8 +41,14 @@ class PixelSafety:
         #static_obs_min_dist = temp_lib.min_dist(img, 'static')
         #dynamic_obs_min_dist = temp_lib.min_dist(img, 'dynamic')
 
-        static_obs_min_dist = torch.load('dataset/inferred_dist_bmasks/00025_static.pt')
-        dynamic_obs_min_dist = torch.load('dataset/inferred_dist_bmasks/00025_dynamic.pt')
+        static_obs_min_dist = np.load(f'dataset/pixel_dist/isStaticObstacle/{dist_file_name}') * self.accuracy_mul
+        # static_obs_min_dist2 = torch.load('dataset/inferred_dist_bmasks/00025_static.pt')
+        #
+        # print(static_obs_min_dist1 - static_obs_min_dist2)
+        #
+        # print(np.max(static_obs_min_dist))
+        # print(static_obs_min_dist.shape, is_road.shape)
+        dynamic_obs_min_dist = np.load(f'dataset/pixel_dist/isDynamicObstacle/{dist_file_name}') * self.accuracy_mul
 
         safety_val = np.ones_like(is_turn)
 
@@ -103,7 +110,7 @@ class PixelSafety:
 
         #Loop through training data
         list_of_upper_bounds = []
-        for (img, safety) in training_imgs:
+        for (img, safety, dist_file_name) in training_imgs:
             is_turn = self.neural_predicates.get_bmask(img, 'isAtTurn')
             is_confined_safe = self.neural_predicates.get_bmask(img, 'isConfinedSafe')
             is_dynamic = self.neural_predicates.get_bmask(img, 'isDynamicObstacle')
@@ -119,8 +126,8 @@ class PixelSafety:
             # dynamic_obs_min_dist_mask = self.neural_predicates.get_closest_dist(img, 'dynamic') * self.accuracy_mul
             # torch.save(dynamic_obs_min_dist_mask, 'dataset/inferred_dist_bmasks/00025_dynamic.pt')
 
-            static_obs_min_dist_mask = torch.load('dataset/inferred_dist_bmasks/00025_static.pt')
-            dynamic_obs_min_dist_mask = torch.load('dataset/inferred_dist_bmasks/00025_dynamic.pt')
+            static_obs_min_dist_mask = np.load(f'dataset/pixel_dist/isStaticObstacle/{dist_file_name}') * self.accuracy_mul
+            dynamic_obs_min_dist_mask = np.load(f'dataset/pixel_dist/isDynamicObstacle/{dist_file_name}') * self.accuracy_mul
 
             print("Done Image Inference")
 
@@ -149,58 +156,58 @@ class PixelSafety:
                 else:
                     rosette_encode_str += f"\n\t\t(or (> side_stat {static_obs_min_dist}) (> side_dyn {dynamic_obs_min_dist}))"
 
-        list_of_upper_bounds.sort()
+            list_of_upper_bounds.sort()
 
-        rosette_encode_str += "\n\t))\n)"
+            rosette_encode_str += "\n\t))\n)"
 
-        #Write rosette string to file and evaluate
-        with open('temp.rkt', "w") as f:
-            f.write(rosette_encode_str)
-
-        proc = subprocess.run(['raco','test','--timeout','60','temp.rkt'], capture_output=True)
-
-        parse = proc.stdout.decode()
-
-        while parse.find('unsat') != -1:
-            #Update rosette string to remove smallest upper bound
-            largest_lower = str(list_of_upper_bounds.pop(0))
-            print(largest_lower)
-
-            idxs_to_remove = []
-            idx = 0
-            for line in rosette_encode_str.split('\n'):
-                if line.find(largest_lower) != -1:
-                    idxs_to_remove.append(idx)
-                    print('Found: ', idx)
-
-                idx += 1
-
-            new_rosette_encode_str = ""
-            idx = 0
-            for line in rosette_encode_str.split('\n'):
-                if idx not in idxs_to_remove:
-                    new_rosette_encode_str += "\n" + line
-                else:
-                    print('Removing: ', idx)
-
-                idx += 1
-
-            #Delete temp.rkt and rewrite
-            os.remove('temp.rkt')
+            #Write rosette string to file and evaluate
             with open('temp.rkt', "w") as f:
-                f.write(new_rosette_encode_str)
+                f.write(rosette_encode_str)
 
-            #Update old rosette encoding string to ensure correct lines are removed
-            rosette_encode_str = new_rosette_encode_str
-
-            #Rerun
             proc = subprocess.run(['raco','test','--timeout','60','temp.rkt'], capture_output=True)
 
             parse = proc.stdout.decode()
 
-        #Parse output and update params
-        print(parse)
-        self.set_ints(parse)
+            while parse.find('unsat') != -1:
+                #Update rosette string to remove smallest upper bound
+                largest_lower = str(list_of_upper_bounds.pop(0))
+                print(largest_lower)
+
+                idxs_to_remove = []
+                idx = 0
+                for line in rosette_encode_str.split('\n'):
+                    if line.find(largest_lower) != -1:
+                        idxs_to_remove.append(idx)
+                        print('Found: ', idx)
+
+                    idx += 1
+
+                new_rosette_encode_str = ""
+                idx = 0
+                for line in rosette_encode_str.split('\n'):
+                    if idx not in idxs_to_remove:
+                        new_rosette_encode_str += "\n" + line
+                    else:
+                        print('Removing: ', idx)
+
+                    idx += 1
+
+                #Delete temp.rkt and rewrite
+                os.remove('temp.rkt')
+                with open('temp.rkt', "w") as f:
+                    f.write(new_rosette_encode_str)
+
+                #Update old rosette encoding string to ensure correct lines are removed
+                rosette_encode_str = new_rosette_encode_str
+
+                #Rerun
+                proc = subprocess.run(['raco','test','--timeout','60','temp.rkt'], capture_output=True)
+
+                parse = proc.stdout.decode()
+
+            #Parse output and update params
+            print(parse)
+            self.set_ints(parse)
 
     def get_applicable_pixel(self, is_turn_mask, is_confined_safe_mask, is_dynamic_mask, is_static_mask, is_in_front_mask, is_road_mask,
                                           is_bad_terrain_mask):
@@ -249,35 +256,30 @@ class PixelSafety:
             if int_list[2] > 0:
                 if int_list[2] / float(self.accuracy_mul) > self.dist_mins['sidewalk_static']:
                     self.dist_mins['sidewalk_static'] = int_list[2] / float(self.accuracy_mul)
-            else:
-                if self.dist_mins['road_static'] > self.dist_mins['sidewalk_static']:
-                    self.dist_mins['sidewalk_static'] = self.dist_mins['road_static']
 
             if int_list[3] > 0:
                 if int_list[3] / float(self.accuracy_mul) > self.dist_mins['sidewalk_dynamic']:
                     self.dist_mins['sidewalk_dynamic'] = int_list[3] / float(self.accuracy_mul)
-            else:
-                if self.dist_mins['road_dynamic'] > self.dist_mins['sidewalk_dynamic']:
-                    self.dist_mins['sidewalk_dynamic'] = self.dist_mins['road_dynamic']
-        else:
-            if self.dist_mins['road_static'] > self.dist_mins['sidewalk_static']:
-                self.dist_mins['sidewalk_static'] = self.dist_mins['road_static']
-            if self.dist_mins['road_dynamic'] > self.dist_mins['sidewalk_dynamic']:
-                self.dist_mins['sidewalk_dynamic'] = self.dist_mins['road_dynamic']
 
 
 if __name__ == "__main__":
-    img = np.array(Image.open('dataset/raw_images/00025.png'))
-    gt_safe = np.array(Image.open('dataset/safety_bmask/00025.png'))
+    # img1 = np.array(Image.open('dataset/raw_images/00025.png'))
+    # gt_safe1 = np.array(Image.open('dataset/safety_bmask/00025.png'))
 
-    training_set = [(img, gt_safe)]
+    # img2 = np.array(Image.open('dataset/raw_images/00027.png'))
+    # gt_safe2 = np.array(Image.open('dataset/safety_bmask/00027.png'))
+
+    # img3 = np.array(Image.open('dataset/raw_images/00029.png'))
+    # gt_safe3 = np.array(Image.open('dataset/safety_bmask/00029.png'))
+    #
+    # training_set = [(img3, gt_safe3, '00029.npy')]
 
     #Init module
-    #evaluator = PixelSafety()
+    # evaluator = PixelSafety()
+    #
+    # evaluator.get_dist_params(training_set, num_samples=1000)
 
-    #evaluator.get_dist_params(training_set, num_samples=1000)
-
-    evaluator = PixelSafety({'road_static': 625.0, 'road_dynamic': 345.0, 'sidewalk_static': 625.0, 'sidewalk_dynamic': 345.0})
+    evaluator = PixelSafety({'road_static': 1406.0, 'road_dynamic': 1137.0, 'sidewalk_static': 251.0, 'sidewalk_dynamic': 427.0})
 
     #Print parse params
     print("Road Static: ", evaluator.dist_mins['road_static'])
@@ -285,7 +287,44 @@ if __name__ == "__main__":
     print("Sidewalk Static: ", evaluator.dist_mins['sidewalk_static'])
     print("Sidewalk Dynamic: ", evaluator.dist_mins['sidewalk_dynamic'])
 
-    gen_safety_mask = evaluator.eval_pixel_safety(img)
+    # gen_safety_mask = evaluator.eval_pixel_safety(img)
 
-    ax = sns.heatmap(gen_safety_mask)
-    plt.show()
+    # ax = sns.heatmap(gen_safety_mask)
+    # plt.show()
+
+    #Calculate false positive
+    num_false_positive = 0
+    num_true_positive = 0
+    num_false_negative = 0
+    total_num = 0
+
+    #Iterate over images in dataset
+    dir_list = os.listdir('dataset/raw_images')
+    idx = 0
+    for img_labelled_name in dir_list:
+        idx += 1
+        print(img_labelled_name, f" is {idx} out of {len(dir_list)}")
+        img = np.array(Image.open(f'dataset/raw_images/{img_labelled_name}'))
+        gt_safe = np.array(Image.open(f'dataset/bmasks/isSidewalk/{img_labelled_name}'))
+
+        # dist_file_name = img_labelled_name.rstrip('png') + "npy"
+        # gen_safety_mask = evaluator.eval_pixel_safety(img, dist_file_name)
+
+        #Name doesn't make sense here but didn't want to rename all below
+        gen_safety_mask = evaluator.neural_predicates.get_bmask(img, 'isSidewalk')
+
+        r, c = gen_safety_mask.shape
+        for i in range(r):
+            for j in range(c):
+                if gen_safety_mask[i, j] == 1 and (gt_safe[i,j,0] == 0 or gt_safe[i,j,1] == 0 or gt_safe[i,j,2] == 0):
+                    num_false_positive += 1
+                if gen_safety_mask[i, j] == 1 and (gt_safe[i,j,0] > 0 or gt_safe[i,j,1] > 0 or gt_safe[i,j,2] > 0):
+                    num_true_positive += 1
+                if gen_safety_mask[i, j] == 0 and (gt_safe[i,j,0] > 0 or gt_safe[i,j,1] > 0 or gt_safe[i,j,2] > 0):
+                    num_false_negative += 1
+
+                total_num += 1
+
+        print('Current False Positive Rate: ', num_false_positive/total_num)
+        if num_true_positive + 0.5*(num_false_positive + num_false_negative) > 0:
+            print('Current F1 Score: ', num_true_positive/(num_true_positive + 0.5*(num_false_positive + num_false_negative)))
