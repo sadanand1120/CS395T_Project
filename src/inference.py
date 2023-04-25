@@ -21,7 +21,7 @@ LINE_CLEAR = '\x1b[2K'
 
 
 class NeuralPredicates:
-    def __init__(self, CKPTS_DIR="ckpts", CKPT_NUM=500):
+    def __init__(self, CKPTS_DIR="ckpts", CKPT_NUM=3500):
         self.height = 1280//2
         self.width = 1920//2
         self.ckpts_dir = CKPTS_DIR
@@ -75,7 +75,7 @@ class NeuralPredicates:
         return self._process_neural_outputs(seg)
 
     def binary_to_prob_pool(self, bin):
-        return pool2d(bin, kernel_size=25, stride=1, pool_mode='avg')
+        return pool2d(bin, kernel_size=45, stride=1, pool_mode='avg')
 
     def get_closest_dist(self, img, obstacle="static"):
         if obstacle == "static":

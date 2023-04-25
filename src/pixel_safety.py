@@ -41,14 +41,14 @@ class PixelSafety:
         #static_obs_min_dist = temp_lib.min_dist(img, 'static')
         #dynamic_obs_min_dist = temp_lib.min_dist(img, 'dynamic')
 
-        static_obs_min_dist = np.load(f'dataset/pixel_dist/isStaticObstacle/{dist_file_name}') * self.accuracy_mul
+        static_obs_min_dist = np.load(f'dataset/pixel_dist/isStaticObstacle/{dist_file_name}.npy') * self.accuracy_mul
         # static_obs_min_dist2 = torch.load('dataset/inferred_dist_bmasks/00025_static.pt')
         #
         # print(static_obs_min_dist1 - static_obs_min_dist2)
         #
         # print(np.max(static_obs_min_dist))
         # print(static_obs_min_dist.shape, is_road.shape)
-        dynamic_obs_min_dist = np.load(f'dataset/pixel_dist/isDynamicObstacle/{dist_file_name}') * self.accuracy_mul
+        dynamic_obs_min_dist = np.load(f'dataset/pixel_dist/isDynamicObstacle/{dist_file_name}.npy') * self.accuracy_mul
 
         safety_val = np.ones_like(is_turn)
 
